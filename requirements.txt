@@ -6,4 +6,5 @@ numpy==1.26.4
 pandas==2.1.4
 requests==2.31.0
 schedule==1.2.1
-yfinance==0.2.38
+yfinance==0.2.36
+--only-binary=:all:
