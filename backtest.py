@@ -963,6 +963,32 @@ def main():
 if __name__ == "__main__":
     main()
 
+# ← outside the if block (no indentation)
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="AlgoTrade Backtest Engine")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/health")
+def health():
+    return {
+        "status": "alive",
+        "ist_time": now_ist().strftime("%H:%M:%S IST"),
+        "market_open": is_nse_session()
+    }
+
+@app.post("/backtest")
+def backtest(req: dict):
+    return {"status": "ok"}
+
+
  
 
   
