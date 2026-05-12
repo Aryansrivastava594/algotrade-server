@@ -1,7 +1,8 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║     AlgoTrade Backtesting Engine  v3.0  — NSE Stocks        ║
-║     INR · Indian Stocks · REST API · Multi-Symbol            ║
+║     AlgoTrade Backtesting Engine  v4.0  — NSE 30 Stocks    ║
+║     INR · Indian Stocks · REST API · Multi-Symbol          ║
+║     30 Stocks · Category Filter · Supabase · Telegram      ║
 ╚══════════════════════════════════════════════════════════════╝
 
 Usage:
@@ -9,8 +10,9 @@ Usage:
     python backtest_engine.py --schedule   # daily at 16:00 IST
     python backtest_engine.py --api        # REST API on port 8080
     python backtest_engine.py --symbol RELIANCE.NS
-    python backtest_engine.py --all        # all 6 NSE stocks
+    python backtest_engine.py --all        # all 30 NSE stocks
     python backtest_engine.py --notify     # send Telegram summary
+    python backtest_engine.py --category "Large Cap"  # filter by category
 
 Dependencies:
     pip install numpy pandas requests schedule python-dotenv yfinance fastapi uvicorn
@@ -30,7 +32,7 @@ import itertools
 import statistics
 import threading
 from pathlib import Path
-from typing  import Optional, List
+from typing  import Optional, List, Dict, Any
 from dotenv  import load_dotenv
 
 import numpy as np
@@ -63,15 +65,63 @@ RESULTS_DIR.mkdir(exist_ok=True)
 COMMISSION      = 0.0005   # 0.05% round trip
 SCORE_THRESHOLD = 0.40
 
-# NSE stock universe with INR prices
+# ═══════════════════════════════════════════════════════════════
+#  30 NSE STOCKS WITH CATEGORIES
+# ═══════════════════════════════════════════════════════════════
+
 NSE_ASSETS = {
-    "RELIANCE.NS":  {"label": "RELIANCE",  "price": 2_855, "vol": 0.014},
-    "TCS.NS":       {"label": "TCS",       "price": 3_820, "vol": 0.012},
-    "INFY.NS":      {"label": "INFY",      "price": 1_645, "vol": 0.015},
-    "HDFCBANK.NS":  {"label": "HDFCBANK",  "price": 1_680, "vol": 0.013},
-    "ICICIBANK.NS": {"label": "ICICIBANK", "price":   980, "vol": 0.016},
-    "SBIN.NS":      {"label": "SBIN",      "price":   780, "vol": 0.018},
+    # Large Cap
+    "IDBI.NS":      {"label": "IDBI",       "price": 85,    "vol": 0.025, "category": "Large Cap"},
+    "BAJAJHFL.NS":  {"label": "BAJAJHFL",   "price": 165,   "vol": 0.022, "category": "Large Cap"},
+    "NHPC.NS":      {"label": "NHPC",       "price": 95,    "vol": 0.018, "category": "Large Cap"},
+    "IOB.NS":       {"label": "IOB",        "price": 55,    "vol": 0.028, "category": "Large Cap"},
+    "SUZLON.NS":    {"label": "SUZLON",     "price": 72,    "vol": 0.035, "category": "Large Cap"},
+    "GMRINFRA.NS":  {"label": "GMRINFRA",   "price": 88,    "vol": 0.024, "category": "Large Cap"},
+    "NMDC.NS":      {"label": "NMDC",       "price": 78,    "vol": 0.020, "category": "Large Cap"},
+    "UCOBANK.NS":   {"label": "UCOBANK",    "price": 48,    "vol": 0.030, "category": "Large Cap"},
+    "MAHABANK.NS":  {"label": "MAHABANK",   "price": 52,    "vol": 0.027, "category": "Large Cap"},
+    "CENTRALBK.NS": {"label": "CENTRALBK",  "price": 62,    "vol": 0.026, "category": "Large Cap"},
+
+    # Infra
+    "SJVN.NS":      {"label": "SJVN",       "price": 110,   "vol": 0.019, "category": "Infra"},
+    "NBCC.NS":      {"label": "NBCC",       "price": 125,   "vol": 0.021, "category": "Infra"},
+    "IRB.NS":       {"label": "IRB",        "price": 58,    "vol": 0.023, "category": "Infra"},
+    "INOXWIND.NS":  {"label": "INOXWIND",   "price": 185,   "vol": 0.032, "category": "Infra"},
+    "RPOWER.NS":    {"label": "RPOWER",     "price": 32,    "vol": 0.040, "category": "Infra"},
+    "RINFRA.NS":    {"label": "RINFRA",     "price": 28,    "vol": 0.038, "category": "Infra"},
+    "PATELENG.NS":  {"label": "PATELENG",   "price": 45,    "vol": 0.029, "category": "Infra"},
+
+    # Finance
+    "IDFCFIRSTB.NS": {"label": "IDFCFIRSTB", "price": 92,   "vol": 0.024, "category": "Finance"},
+    "YESBANK.NS":   {"label": "YESBANK",    "price": 28,    "vol": 0.045, "category": "Finance"},
+    "IFCI.NS":      {"label": "IFCI",       "price": 85,    "vol": 0.026, "category": "Finance"},
+    "MSUMI.NS":     {"label": "MSUMI",      "price": 145,   "vol": 0.017, "category": "Finance"},
+    "SBFC.NS":      {"label": "SBFC",       "price": 78,    "vol": 0.022, "category": "Finance"},
+    "UJJIVANSFB.NS": {"label": "UJJIVANSFB", "price": 55,   "vol": 0.028, "category": "Finance"},
+    "NIVABUPA.NS":  {"label": "NIVABUPA",   "price": 95,    "vol": 0.020, "category": "Finance"},
+    "SHRIRAMPRP.NS": {"label": "SHRIRAMPRP", "price": 42,   "vol": 0.031, "category": "Finance"},
+
+    # Industrial
+    "TRIDENT.NS":   {"label": "TRIDENT",    "price": 52,    "vol": 0.025, "category": "Industrial"},
+    "TTML.NS":      {"label": "TTML",       "price": 125,   "vol": 0.033, "category": "Industrial"},
+    "NMDCSTEEL.NS": {"label": "NMDCSTEEL",  "price": 68,    "vol": 0.021, "category": "Industrial"},
+    "MOREPEN.NS":   {"label": "MOREPEN",    "price": 95,    "vol": 0.027, "category": "Industrial"},
+    "ASIANGRN.NS":  {"label": "ASIANGRN",   "price": 48,    "vol": 0.029, "category": "Industrial"},
 }
+
+# ═══════════════════════════════════════════════════════════════
+#  CATEGORY HELPERS
+# ═══════════════════════════════════════════════════════════════
+
+def get_stocks_by_category(category: str = None) -> dict:
+    """Filter stocks by category"""
+    if not category:
+        return NSE_ASSETS
+    return {k: v for k, v in NSE_ASSETS.items() if v["category"] == category}
+
+def get_all_categories() -> List[str]:
+    """Get unique categories"""
+    return list(set(v["category"] for v in NSE_ASSETS.values()))
 
 # ═══════════════════════════════════════════════════════════════
 #  NSE SESSION HELPERS
@@ -390,12 +440,13 @@ def build_param_grid() -> list:
 def run_sweep(df: pd.DataFrame,
               strategy_filter: Optional[str] = None,
               symbol: str = "UNKNOWN",
+              category: str = "",
               verbose: bool = True) -> list:
     grid = build_param_grid()
     if strategy_filter:
         grid = [p for p in grid if p["strategy"] == strategy_filter]
 
-    log.info(f"Sweep: {symbol} | {len(grid)} combinations | {len(df)} bars")
+    log.info(f"Sweep: {symbol} [{category}] | {len(grid)} combinations | {len(df)} bars")
     results = []
     start   = time.time()
 
@@ -403,7 +454,7 @@ def run_sweep(df: pd.DataFrame,
         signals = STRATEGY_FN[params["strategy"]](df, params)
         res     = run_backtest(df, signals, params["sl"], params["tp"])
         if res:
-            results.append({**params, **res, "symbol": symbol})
+            results.append({**params, **res, "symbol": symbol, "category": category})
         if verbose and idx % 200 == 0:
             pct = idx / len(grid) * 100
             log.info(f"  [{pct:5.1f}%] {idx}/{len(grid)} valid:{len(results)}")
@@ -413,11 +464,15 @@ def run_sweep(df: pd.DataFrame,
     return results
 
 
-def run_sweep_all_symbols(live_data: bool = False) -> list:
+def run_sweep_all_symbols(live_data: bool = False, category: str = None) -> list:
     all_results = []
-    for symbol, meta in NSE_ASSETS.items():
+
+    # Filter by category if specified
+    assets = get_stocks_by_category(category) if category else NSE_ASSETS
+
+    for symbol, meta in assets.items():
         log.info(f"{'─'*50}")
-        log.info(f"Symbol: {symbol}  ({meta['label']})")
+        log.info(f"Symbol: {symbol}  ({meta['label']})  [{meta['category']}]")
         try:
             df = (fetch_live_data(symbol=symbol)
                   if live_data
@@ -425,7 +480,7 @@ def run_sweep_all_symbols(live_data: bool = False) -> list:
                       start_price=meta["price"],
                       vol=meta["vol"]
                   ))
-            results = run_sweep(df, symbol=meta["label"], verbose=False)
+            results = run_sweep(df, symbol=meta["label"], category=meta["category"], verbose=False)
             all_results.extend(results)
         except Exception as e:
             log.warning(f"Failed {symbol}: {e}")
@@ -461,11 +516,30 @@ def strategy_summary(results: list) -> dict:
     return summary
 
 
+def category_summary(results: list) -> dict:
+    """Summary by stock category"""
+    summary = {}
+    for cat in get_all_categories():
+        cr = [r for r in results if r.get("category") == cat]
+        if not cr:
+            summary[cat] = {"count": 0, "avg_score": 0, "best_symbol": "N/A"}
+            continue
+        avg_score = sum(r["score"] for r in cr) / len(cr)
+        best = max(cr, key=lambda r: r["score"])
+        summary[cat] = {
+            "count": len(cr),
+            "avg_score": round(avg_score, 4),
+            "best_symbol": best["symbol"],
+            "best_score": best["score"],
+        }
+    return summary
+
+
 def print_top_results(results: list, n: int = 10):
     print("\n" + "═"*80)
-    print(f"  TOP {n} PARAMETER SETS  (NSE Stocks)")
+    print(f"  TOP {n} PARAMETER SETS  (NSE 30 Stocks)")
     print("═"*80)
-    hdr = (f"  {'#':>3}  {'STRATEGY':<12}  {'SYMBOL':<10}  {'SL':>5}  {'TP':>5}"
+    hdr = (f"  {'#':>3}  {'STRATEGY':<12}  {'SYMBOL':<10}  {'CAT':<10}  {'SL':>5}  {'TP':>5}"
            f"  {'WIN%':>7}  {'PF':>7}  {'DD%':>6}  {'SHARPE':>7}"
            f"  {'RETURN%':>8}  {'TRADES':>7}  {'SCORE':>7}")
     print(hdr)
@@ -475,6 +549,7 @@ def print_top_results(results: list, n: int = 10):
         print(
             f"  {flag}  {r['strategy']:<12}  "
             f"{r.get('symbol',''):<10}  "
+            f"{r.get('category',''):<10}  "
             f"{r['sl']:>5.1f}  {r['tp']:>5.1f}  "
             f"{r['win_rate']*100:>6.1f}%  "
             f"{r['profit_factor']:>7.3f}  "
@@ -504,11 +579,27 @@ def print_strategy_summary(summary: dict):
     print()
 
 
+def print_category_summary(summary: dict):
+    print("\n  CATEGORY PERFORMANCE")
+    print("─"*60)
+    for cat, s in summary.items():
+        if s["count"] == 0:
+            print(f"  {cat:<12}  — no data")
+        else:
+            print(
+                f"  {cat:<12}  "
+                f"tests:{s['count']:>4}  "
+                f"avg:{s['avg_score']:.3f}  "
+                f"best:{s['best_symbol']}({s['best_score']:.3f})"
+            )
+    print()
+
+
 # ═══════════════════════════════════════════════════════════════
 #  8. SAVE RESULTS
 # ═══════════════════════════════════════════════════════════════
 
-def save_results(results: list, summary: dict) -> Path:
+def save_results(results: list, summary: dict, cat_summary: dict = None) -> Path:
     ts   = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = RESULTS_DIR / f"backtest_nse_{ts}.json"
 
@@ -522,6 +613,7 @@ def save_results(results: list, summary: dict) -> Path:
         "passed":           sum(1 for r in results if r["score"] > SCORE_THRESHOLD),
         "best_score":       results[0]["score"] if results else 0,
         "strategy_summary": summary,
+        "category_summary": cat_summary or {},
         "top_100":          slim[:100],
         "deployed_params":  slim[0] if slim else None,
     }
@@ -538,10 +630,10 @@ def save_results(results: list, summary: dict) -> Path:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  9. SAVE TO SUPABASE
+#  9. SUPABASE INTEGRATION
 # ═══════════════════════════════════════════════════════════════
 
-def save_to_supabase(results: list, summary: dict) -> bool:
+def save_to_supabase(results: list, summary: dict, cat_summary: dict = None) -> bool:
     if not SUPABASE_URL or not SUPABASE_KEY:
         log.warning("Supabase not configured — skipping")
         return False
@@ -557,29 +649,67 @@ def save_to_supabase(results: list, summary: dict) -> bool:
             "passed":           sum(1 for r in results if r["score"] > SCORE_THRESHOLD),
             "best_score":       results[0]["score"] if results else 0,
             "strategy_summary": json.dumps(summary),
-            "top_results":      json.dumps(slim),
-            "deployed_params":  json.dumps(slim[0] if slim else {}),
+            "category_summary": json.dumps(cat_summary) if cat_summary else None,
+            "top_results":      json.dumps(slim[:20]),
+            "deployed_params":  json.dumps(slim[0]) if slim else None,
         }
 
         headers = {
-            "apikey":        SUPABASE_KEY,
+            "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type":  "application/json",
-            "Prefer":        "return=minimal",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
         }
 
-        url = f"{SUPABASE_URL}/rest/v1/backtest_results"
-        resp = requests.post(url, headers=headers, json=payload, timeout=10)
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/backtest_results",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
 
         if resp.status_code in (200, 201):
-            log.info("✅ Saved to Supabase")
+            log.info("Supabase save OK")
             return True
         else:
-            log.warning(f"Supabase error {resp.status_code}: {resp.text}")
+            log.warning(f"Supabase error {resp.status_code}: {resp.text[:200]}")
             return False
 
     except Exception as e:
-        log.warning(f"Supabase save failed: {e}")
+        log.error(f"Supabase failed: {e}")
+        return False
+
+
+def save_signal_to_supabase(signal_data: dict) -> bool:
+    """Save real-time signal from Activepieces/TradingView"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        log.warning("Supabase not configured — skipping signal save")
+        return False
+
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/stock_signals",
+            headers=headers,
+            json=signal_data,
+            timeout=15
+        )
+
+        if resp.status_code in (200, 201):
+            log.info(f"Signal saved to Supabase: {signal_data.get('symbol')}")
+            return True
+        else:
+            log.warning(f"Supabase signal error {resp.status_code}: {resp.text[:200]}")
+            return False
+
+    except Exception as e:
+        log.error(f"Supabase signal save failed: {e}")
         return False
 
 
@@ -587,410 +717,101 @@ def save_to_supabase(results: list, summary: dict) -> bool:
 #  10. TELEGRAM NOTIFICATIONS
 # ═══════════════════════════════════════════════════════════════
 
-def send_telegram(message: str) -> bool:
+def telegram_message(text: str) -> bool:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHATID:
-        log.warning("Telegram not configured — skipping")
+        log.warning("Telegram not configured")
         return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        resp = requests.post(url, json={
-            "chat_id":    TELEGRAM_CHATID,
-            "text":       message,
-            "parse_mode": "Markdown"
-        }, timeout=10)
-        if resp.status_code == 200:
-            log.info("✅ Telegram notification sent")
-            return True
-        else:
-            log.warning(f"Telegram error: {resp.text}")
-            return False
+        r = requests.post(url, json={"chat_id": TELEGRAM_CHATID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+        return r.status_code == 200
     except Exception as e:
-        log.warning(f"Telegram failed: {e}")
+        log.error(f"Telegram failed: {e}")
         return False
 
 
-def build_telegram_message(results: list, summary: dict) -> str:
-    best = results[0] if results else {}
-    lines = [
-        "📊 *AlgoTrade Backtest Complete*",
-        f"🕐 {now_ist().strftime('%d %b %Y %H:%M IST')}",
-        f"📈 Market: NSE | Currency: INR",
-        "",
-        f"✅ Total Tested: {len(results)}",
-        f"🏆 Best Score: {best.get('score', 0):.4f}",
-        f"📉 Best Strategy: {best.get('strategy','—').upper()}",
-        f"💹 Symbol: {best.get('symbol','—')}",
-        f"🎯 Win Rate: {best.get('win_rate',0)*100:.1f}%",
-        f"💰 Total Return: {best.get('total_return',0):+.1f}%",
-        f"📊 Profit Factor: {best.get('profit_factor',0):.2f}",
-        f"📉 Max Drawdown: {best.get('max_drawdown',0)*100:.1f}%",
-        "",
-        "*Strategy Status:*",
-    ]
-    for strat, s in summary.items():
-        icon = "✅" if s["active"] else "❌"
-        lines.append(f"{icon} {strat.upper()}: avg score {s['avg_score']:.3f}")
-
-    return "\n".join(lines)
-
-
-# ═══════════════════════════════════════════════════════════════
-#  11. KEEP ALIVE (prevents Render free tier sleep)
-# ═══════════════════════════════════════════════════════════════
-
-def keep_alive():
-    """Ping self every 10 minutes to prevent Render sleep."""
-    time.sleep(60)  # wait 1 min before first ping
-    while True:
-        try:
-            if RENDER_URL:
-                url  = f"{RENDER_URL}/health"
-                resp = requests.get(url, timeout=10)
-                log.info(f"Keep-alive ping ✅ ({resp.status_code})")
-            else:
-                log.debug("RENDER_URL not set — skipping keep-alive ping")
-        except Exception as e:
-            log.warning(f"Keep-alive failed: {e}")
-        time.sleep(600)  # ping every 10 minutes
-
-
-def start_keep_alive():
-    thread = threading.Thread(target=keep_alive, daemon=True)
-    thread.start()
-    log.info("🔁 Keep-alive thread started (ping every 10 min)")
-
-
-# ═══════════════════════════════════════════════════════════════
-#  12. SCHEDULED JOB
-# ═══════════════════════════════════════════════════════════════
-
-def scheduled_job():
-    log.info("⏰ Scheduled backtest starting...")
-    results = run_sweep_all_symbols(live_data=True)
+def notify_top_results(results: list, n: int = 5):
     if not results:
-        log.warning("No results from sweep")
         return
-    summary = strategy_summary(results)
-    print_top_results(results)
-    print_strategy_summary(summary)
-    path = save_results(results, summary)
-    save_to_supabase(results, summary)
-    msg = build_telegram_message(results, summary)
-    send_telegram(msg)
-    log.info("✅ Scheduled job complete")
+    lines = ["🔔 *AlgoTrade Backtest Results*", f"_{now_ist().strftime('%d %b %Y %H:%M')}_", ""]
+    for i, r in enumerate(results[:n], 1):
+        emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+        lines.append(
+            f"{emoji} *{r['symbol']}* | {r['strategy']}\n"
+            f"Score: `{r['score']:.4f}` | WR: `{r['win_rate']*100:.1f}%` | PF: `{r['profit_factor']:.2f}`"
+        )
+    lines.append("")
+    lines.append(f"Total tested: `{len(results)}` | Passed: `{sum(1 for r in results if r['score'] > SCORE_THRESHOLD)}`")
+    telegram_message("\n".join(lines))
 
 
 # ═══════════════════════════════════════════════════════════════
-#  13. FASTAPI REST API
-# ═══════════════════════════════════════════════════════════════
-
-def start_api(port: int = 8080):
-    try:
-        from fastapi import FastAPI, HTTPException, BackgroundTasks
-        from fastapi.middleware.cors import CORSMiddleware
-        from pydantic import BaseModel
-        import uvicorn
-    except ImportError:
-        log.error("FastAPI/uvicorn not installed. Run: pip install fastapi uvicorn")
-        sys.exit(1)
-
-    app = FastAPI(
-        title       = "AlgoTrade Backtest Engine",
-        description = "NSE Stock Backtesting REST API",
-        version     = "3.0",
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins  = ["*"],
-        allow_methods  = ["*"],
-        allow_headers  = ["*"],
-    )
-
-    # ── Request Models ──────────────────────────────────────────
-
-    class BacktestRequest(BaseModel):
-        symbol:   str   = "RELIANCE.NS"
-        strategy: str   = "momentum"
-        live:     bool  = False
-        sl:       float = 1.0
-        tp:       float = 2.0
-
-    class SweepRequest(BaseModel):
-        symbol:   str  = "RELIANCE.NS"
-        strategy: str  = None
-        live:     bool = False
-
-    class SweepAllRequest(BaseModel):
-        live: bool = False
-
-    # ── Endpoints ───────────────────────────────────────────────
-
-    @app.get("/")
-    def root():
-        return {
-            "name":        "AlgoTrade Backtest Engine",
-            "version":     "3.0",
-            "market":      "NSE",
-            "currency":    "INR",
-            "market_open": is_nse_session(),
-            "ist_time":    now_ist().strftime("%d %b %Y %H:%M:%S IST"),
-            "endpoints": [
-                "GET  /health",
-                "GET  /symbols",
-                "POST /backtest",
-                "POST /sweep",
-                "POST /sweep/all",
-                "GET  /results/latest",
-            ]
-        }
-
-    @app.get("/health")
-    def health():
-        """Keep-alive endpoint — also used by Activepieces to check status."""
-        return {
-            "status":      "alive",
-            "ist_time":    now_ist().strftime("%H:%M:%S IST"),
-            "market_open": is_nse_session(),
-            "server":      "Render",
-        }
-
-    @app.get("/symbols")
-    def list_symbols():
-        """List all supported NSE symbols."""
-        return {
-            "symbols": [
-                {"symbol": k, "label": v["label"], "price_inr": v["price"]}
-                for k, v in NSE_ASSETS.items()
-            ]
-        }
-
-    @app.post("/backtest")
-    def backtest_single(req: BacktestRequest):
-        """
-        Run a single backtest with specific parameters.
-        Used by Activepieces HTTP step.
-
-        Body example:
-        {
-          "symbol": "RELIANCE.NS",
-          "strategy": "momentum",
-          "sl": 1.0,
-          "tp": 2.0,
-          "live": false
-        }
-        """
-        if req.strategy not in STRATEGY_FN:
-            raise HTTPException(400, f"Unknown strategy. Choose: {list(STRATEGY_FN.keys())}")
-
-        try:
-            # Load data
-            if req.live:
-                df = fetch_live_data(symbol=req.symbol)
-            else:
-                asset = NSE_ASSETS.get(req.symbol, {"price": 2_855, "vol": 0.014})
-                df    = generate_ohlcv(start_price=asset["price"], vol=asset["vol"])
-
-            # Default params per strategy
-            params = {
-                "momentum": {"period": 14, "fast": 20, "threshold": 55},
-                "trend":    {"fast": 8,    "slow": 50},
-                "breakout": {"period": 20, "vol_mult": 1.5},
-                "sweep":    {"period": 10},
-            }[req.strategy]
-
-            signals = STRATEGY_FN[req.strategy](df, params)
-            result  = run_backtest(df, signals, req.sl, req.tp)
-
-            if not result:
-                raise HTTPException(422, "Not enough trades to evaluate. Try different params.")
-
-            return {
-                "symbol":   req.symbol,
-                "strategy": req.strategy,
-                "sl":       req.sl,
-                "tp":       req.tp,
-                "result":   {k: v for k, v in result.items() if k != "equity_curve"},
-                "decision": "TRADE" if result["score"] > SCORE_THRESHOLD else "SKIP",
-                "ist_time": now_ist().strftime("%H:%M:%S IST"),
-            }
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(500, str(e))
-
-    @app.post("/sweep")
-    def sweep_symbol(req: SweepRequest):
-        """
-        Run full parameter sweep for a symbol.
-        Returns top 10 results + strategy summary.
-        """
-        try:
-            if req.live:
-                df = fetch_live_data(symbol=req.symbol)
-            else:
-                asset = NSE_ASSETS.get(req.symbol, {"price": 2_855, "vol": 0.014})
-                df    = generate_ohlcv(start_price=asset["price"], vol=asset["vol"])
-
-            label   = NSE_ASSETS.get(req.symbol, {}).get("label", req.symbol)
-            results = run_sweep(df, strategy_filter=req.strategy,
-                                symbol=label, verbose=False)
-
-            if not results:
-                raise HTTPException(422, "No valid results found.")
-
-            summary = strategy_summary(results)
-            slim    = [{k:v for k,v in r.items() if k != "equity_curve"} for r in results[:10]]
-
-            return {
-                "symbol":           req.symbol,
-                "total_tested":     len(results),
-                "passed":           sum(1 for r in results if r["score"] > SCORE_THRESHOLD),
-                "best_score":       results[0]["score"],
-                "best_params":      slim[0],
-                "top_10":           slim,
-                "strategy_summary": summary,
-                "ist_time":         now_ist().strftime("%H:%M:%S IST"),
-            }
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(500, str(e))
-
-    @app.post("/sweep/all")
-    def sweep_all(req: SweepAllRequest, background_tasks: BackgroundTasks):
-        """
-        Run sweep across all 6 NSE symbols.
-        Runs in background — check /results/latest for output.
-        """
-        def _run():
-            results = run_sweep_all_symbols(live_data=req.live)
-            if results:
-                summary = strategy_summary(results)
-                save_results(results, summary)
-                save_to_supabase(results, summary)
-                msg = build_telegram_message(results, summary)
-                send_telegram(msg)
-
-        background_tasks.add_task(_run)
-        return {
-            "status":  "started",
-            "message": "Sweep running in background. Check /results/latest in ~2 minutes.",
-            "symbols": list(NSE_ASSETS.keys()),
-        }
-
-    @app.get("/results/latest")
-    def latest_results():
-        """Get the most recent saved backtest results."""
-        files = sorted(RESULTS_DIR.glob("*.json"), reverse=True)
-        if not files:
-            raise HTTPException(404, "No results found. Run /sweep first.")
-        with open(files[0]) as f:
-            data = json.load(f)
-        return data
-
-    # ── Start Server ─────────────────────────────────────────────
-
-    log.info(f"🚀 Starting API on port {port}")
-    start_keep_alive()
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
-
-
-# ═══════════════════════════════════════════════════════════════
-#  14. MAIN ENTRYPOINT
+#  11. MAIN CLI
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="AlgoTrade Backtest Engine v3.0")
-    parser.add_argument("--api",      action="store_true", help="Start REST API on port 8080")
-    parser.add_argument("--schedule", action="store_true", help="Run daily at 16:00 IST")
-    parser.add_argument("--all",      action="store_true", help="Sweep all 6 NSE symbols")
-    parser.add_argument("--notify",   action="store_true", help="Send Telegram summary")
-    parser.add_argument("--live",     action="store_true", help="Use live Yahoo Finance data")
-    parser.add_argument("--symbol",   type=str, default="RELIANCE.NS", help="NSE symbol")
-    parser.add_argument("--strategy", type=str, default=None,
-                        choices=["momentum","trend","breakout","sweep"],
-                        help="Filter strategy")
-    parser.add_argument("--port",     type=int, default=8080, help="API port")
+    parser = argparse.ArgumentParser(description="AlgoTrade NSE Backtest Engine v4.0")
+    parser.add_argument("--symbol",    help="Single NSE symbol (e.g. RELIANCE.NS)")
+    parser.add_argument("--all",       action="store_true", help="Run all 30 NSE stocks")
+    parser.add_argument("--category",  choices=get_all_categories(), help="Filter by category")
+    parser.add_argument("--live",      action="store_true", help="Use live Yahoo Finance data")
+    parser.add_argument("--strategy",  choices=list(STRATEGY_FN.keys()), help="Filter strategy")
+    parser.add_argument("--notify",    action="store_true", help="Send Telegram summary")
+    parser.add_argument("--schedule",  action="store_true", help="Schedule daily at 16:00 IST")
+    parser.add_argument("--api",       action="store_true", help="Start REST API server")
     args = parser.parse_args()
 
-    # ── API Mode ─────────────────────────────────────────────────
     if args.api:
-        start_api(port=args.port)
+        from webhook_server import app
+        import uvicorn
+        port = int(os.getenv("PORT", 8080))
+        uvicorn.run(app, host="0.0.0.0", port=port)
         return
 
-    # ── Scheduled Mode ───────────────────────────────────────────
     if args.schedule:
-        log.info("⏰ Scheduler active — runs daily at 16:00 IST")
-        schedule.every().day.at("16:00").do(scheduled_job)
+        schedule.every().day.at("16:00").do(lambda: run_sweep_all_symbols(live_data=True))
+        log.info("Scheduler started — daily at 16:00 IST")
         while True:
             schedule.run_pending()
             time.sleep(60)
         return
 
-    # ── Single / All Run ─────────────────────────────────────────
-    if args.all:
-        results = run_sweep_all_symbols(live_data=args.live)
-    else:
-        if args.live:
-            df = fetch_live_data(symbol=args.symbol)
-        else:
-            asset = NSE_ASSETS.get(args.symbol, {"price": 2_855, "vol": 0.014})
-            df    = generate_ohlcv(start_price=asset["price"], vol=asset["vol"])
-
-        label   = NSE_ASSETS.get(args.symbol, {}).get("label", args.symbol)
-        results = run_sweep(df, strategy_filter=args.strategy, symbol=label)
-
-    if not results:
-        log.error("No valid results — check data or parameters")
+    if args.all or args.category:
+        results = run_sweep_all_symbols(live_data=args.live, category=args.category)
+        if not results:
+            log.warning("No valid results")
+            return
+        summary = strategy_summary(results)
+        cat_summary = category_summary(results)
+        print_top_results(results)
+        print_strategy_summary(summary)
+        print_category_summary(cat_summary)
+        save_results(results, summary, cat_summary)
+        save_to_supabase(results, summary, cat_summary)
+        if args.notify:
+            notify_top_results(results)
         return
 
-    summary = strategy_summary(results)
-    print_top_results(results)
-    print_strategy_summary(summary)
-    path = save_results(results, summary)
-    save_to_supabase(results, summary)
+    if args.symbol:
+        symbol = args.symbol.upper()
+        meta = NSE_ASSETS.get(symbol, {"label": symbol.replace(".NS",""), "price": 2_855, "vol": 0.014, "category": "Unknown"})
+        log.info(f"Single run: {symbol} ({meta['label']}) [{meta['category']}]")
+        df = fetch_live_data(symbol=symbol) if args.live else generate_ohlcv(start_price=meta["price"], vol=meta["vol"])
+        results = run_sweep(df, strategy_filter=args.strategy, symbol=meta["label"], category=meta["category"])
+        if results:
+            print_top_results(results, n=5)
+            save_results(results, strategy_summary(results))
+        return
 
-    if args.notify:
-        msg = build_telegram_message(results, summary)
-        send_telegram(msg)
-
-    log.info("✅ Done")
+    # Default: quick demo on top 5 stocks
+    log.info("No args — running demo on top 5 stocks")
+    top5 = dict(list(NSE_ASSETS.items())[:5])
+    for symbol, meta in top5.items():
+        df = generate_ohlcv(start_price=meta["price"], vol=meta["vol"])
+        results = run_sweep(df, symbol=meta["label"], category=meta["category"], verbose=False)
+        if results:
+            print_top_results(results, n=3)
 
 
 if __name__ == "__main__":
     main()
-
-# ← outside the if block (no indentation)
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI(title="AlgoTrade Backtest Engine")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/health")
-def health():
-    return {
-        "status": "alive",
-        "ist_time": now_ist().strftime("%H:%M:%S IST"),
-        "market_open": is_nse_session()
-    }
-
-@app.post("/backtest")
-def backtest(req: dict):
-    return {"status": "ok"}
-
-
- 
-
-  
-
-
