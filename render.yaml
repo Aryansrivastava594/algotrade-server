@@ -1,18 +1,22 @@
 services:
   - type: web
-    name: algotrade-server-new
+    name: algotrade-pro
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn webhook_server:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_ANON_KEY
+      - key: ENVIRONMENT
+        value: render
+      - key: API_KEY
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
-    plan: free
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true
+
