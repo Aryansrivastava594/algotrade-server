@@ -229,7 +229,20 @@ async def on_startup():
     log.info(f"  Supabase     : {'✅' if SUPABASE_URL else '❌'}")
     log.info(f"  Dhan Broker  : {'✅ configured' if DHAN_CONFIGURED else '❌ not set'}")
     log.info("═" * 55)
+@app.on_event("startup")
+async def on_startup():
+    log.info("Starting token refresh scheduler...")
 
+    # Start token refresh in background thread
+    import threading
+    from token_refresh import start_scheduler
+
+    thread = threading.Thread(
+        target=start_scheduler,
+        daemon=True
+    )
+    thread.start()
+    log.info("✅ Token refresh scheduler running") 
 
 # ═══════════════════════════════════════════════════════════════
 #  BASIC ROUTES
