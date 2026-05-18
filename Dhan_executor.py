@@ -1,6 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║   AlgoTrade Pro — Dhan Broker Execution Engine  v2.0        ║
+║   AlgoTrade Pro — Dhan Broker Execution Engine  v3.0        ║
+║   Compatible with dhanhq == 2.2.0                           ║
 ║   Full order management for 40 NSE stocks                   ║
 ╚══════════════════════════════════════════════════════════════╝
 """
@@ -65,21 +66,19 @@ SYMBOL_MAP = {
     "BALMERLAWR":    "523319",
     "SPIC":          "500405",
     "TNPETRO":       "500777",
-    # ── Extra stocks ──────────────────────────────────────────
+    # ── Extra ─────────────────────────────────────────────────
     "IRFC":          "543257",
     "RVNL":          "542649",
-    "RAILVIKAS":     "542649",
     "HFCL":          "500183",
     "TATAPOWER":     "500400",
     "ADANIPOWER":    "533096",
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  QUANTITY MAP — based on price range
+#  QUANTITY MAP
 # ═══════════════════════════════════════════════════════════════
 
 QTY_MAP = {
-    # Very low price → high qty
     "YESBANK":    500,
     "RPOWER":     500,
     "UCOBANK":    400,
@@ -89,7 +88,6 @@ QTY_MAP = {
     "MAHABANK":   300,
     "CENTRALBK":  300,
     "TRIDENT":    300,
-    # Medium price
     "IDFCFIRSTB": 200,
     "NHPC":       200,
     "SJVN":       200,
@@ -98,20 +96,7 @@ QTY_MAP = {
     "IDBI":       200,
     "NBCC":       150,
     "IRB":        150,
-    "INOXWIND":   100,
-    # Default
     "DEFAULT":    100,
-}
-
-# ═══════════════════════════════════════════════════════════════
-#  ORDER TYPE CONSTANTS
-# ═══════════════════════════════════════════════════════════════
-
-ORDER_TYPES = {
-    "MARKET":    "MARKET",
-    "LIMIT":     "LIMIT",
-    "SL":        "STOP_LOSS",
-    "SL_MARKET": "STOP_LOSS_MARKET",
 }
 
 
@@ -120,6 +105,7 @@ ORDER_TYPES = {
 # ═══════════════════════════════════════════════════════════════
 
 def get_dhan_client():
+    """Get dhanhq v2.2.0 client instance."""
     if not DHAN_CONFIGURED:
         raise ValueError(
             "Dhan not configured. "
@@ -147,23 +133,8 @@ def get_quantity(stock: str, custom_qty: Optional[int] = None) -> int:
     return QTY_MAP.get(symbol, QTY_MAP["DEFAULT"])
 
 
-def calculate_quantity_by_risk(
-    price: float,
-    sl: float,
-    capital: float = 100000,
-    risk_pct: float = 0.02,
-) -> int:
-    """Calculate qty based on risk % of capital."""
-    risk_amount  = capital * risk_pct
-    sl_distance  = abs(price - sl)
-    if sl_distance == 0:
-        return QTY_MAP["DEFAULT"]
-    qty = int(risk_amount / sl_distance)
-    return max(qty, 1)
-
-
 # ═══════════════════════════════════════════════════════════════
-#  PLACE ORDER — Main Function
+#  PLACE ORDER — v2.2.0 syntax
 # ═══════════════════════════════════════════════════════════════
 
 def place_order(
@@ -176,12 +147,7 @@ def place_order(
     order_type: str             = "MARKET",
 ) -> dict:
     """
-    Place BUY or SELL order on Dhan.
-
-    Returns dict with:
-      status:   "success" or "failed"
-      order_id: Dhan order ID
-      error:    error message if failed
+    Place BUY or SELL order on Dhan using dhanhq v2.2.0.
     """
     try:
         from dhanhq import dhanhq
@@ -189,7 +155,11 @@ def place_order(
         dhan      = get_dhan_client()
         sec_id    = get_security_id(stock)
         qty       = get_quantity(stock, quantity)
-        direction = dhanhq.BUY if signal.upper() == "BUY" else dhanhq.SELL
+
+        # v2.2.0 constants
+        direction  = dhanhq.BUY  if signal.upper() == "BUY" else dhanhq.SELL
+        o_type     = dhanhq.MARKET if order_type == "MARKET" else dhanhq.LIMIT
+        price_val  = 0 if order_type == "MARKET" else price
 
         log.info(
             f"Placing {signal} | {stock} | "
@@ -198,26 +168,15 @@ def place_order(
         )
 
         # ── Main Order ──────────────────────────────────────────
-        if order_type == "MARKET":
-            response = dhan.place_order(
-                security_id      = sec_id,
-                exchange_segment = dhanhq.NSE,
-                transaction_type = direction,
-                quantity         = qty,
-                order_type       = dhanhq.MARKET,
-                product_type     = dhanhq.INTRA,
-                price            = 0,
-            )
-        else:
-            response = dhan.place_order(
-                security_id      = sec_id,
-                exchange_segment = dhanhq.NSE,
-                transaction_type = direction,
-                quantity         = qty,
-                order_type       = dhanhq.LIMIT,
-                product_type     = dhanhq.INTRA,
-                price            = price,
-            )
+        response = dhan.place_order(
+            security_id      = sec_id,
+            exchange_segment = dhanhq.NSE,
+            transaction_type = direction,
+            quantity         = qty,
+            order_type       = o_type,
+            product_type     = dhanhq.INTRA,
+            price            = price_val,
+        )
 
         order_id = response.get("data", {}).get("orderId", "unknown")
         log.info(f"✅ Main order placed | orderId:{order_id}")
@@ -232,7 +191,7 @@ def place_order(
                     exchange_segment = dhanhq.NSE,
                     transaction_type = sl_direction,
                     quantity         = qty,
-                    order_type       = dhanhq.SL_MARKET,
+                    order_type       = dhanhq.SLM,
                     product_type     = dhanhq.INTRA,
                     price            = 0,
                     trigger_price    = sl,
@@ -243,11 +202,11 @@ def place_order(
                 log.warning(f"SL order failed: {e}")
 
         # ── Calculate R:R ────────────────────────────────────────
-        rr = 0
+        rr = 0.0
         if sl and tp and price:
             risk   = abs(price - sl)
             reward = abs(tp - price)
-            rr     = round(reward / risk, 2) if risk > 0 else 0
+            rr     = round(reward / risk, 2) if risk > 0 else 0.0
 
         return {
             "status":       "success",
@@ -282,7 +241,7 @@ def place_order(
 
 
 # ═══════════════════════════════════════════════════════════════
-#  GET POSITIONS
+#  GET POSITIONS — v2.2.0
 # ═══════════════════════════════════════════════════════════════
 
 def get_positions() -> list:
@@ -291,14 +250,14 @@ def get_positions() -> list:
         result = dhan.get_positions()
         data   = result.get("data", [])
         log.info(f"Open positions: {len(data)}")
-        return data
+        return data if isinstance(data, list) else []
     except Exception as e:
         log.error(f"Get positions failed: {e}")
         return []
 
 
 # ═══════════════════════════════════════════════════════════════
-#  GET ALL ORDERS
+#  GET ALL ORDERS — v2.2.0
 # ═══════════════════════════════════════════════════════════════
 
 def get_all_orders() -> list:
@@ -307,14 +266,14 @@ def get_all_orders() -> list:
         result = dhan.get_order_list()
         data   = result.get("data", [])
         log.info(f"Total orders today: {len(data)}")
-        return data
+        return data if isinstance(data, list) else []
     except Exception as e:
         log.error(f"Get orders failed: {e}")
         return []
 
 
 # ═══════════════════════════════════════════════════════════════
-#  GET ORDER STATUS
+#  GET ORDER STATUS — v2.2.0
 # ═══════════════════════════════════════════════════════════════
 
 def get_order_status(order_id: str) -> dict:
@@ -328,25 +287,43 @@ def get_order_status(order_id: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  GET PORTFOLIO SUMMARY
+#  GET FUND LIMITS — v2.2.0
+# ═══════════════════════════════════════════════════════════════
+
+def get_fund_limits() -> dict:
+    try:
+        dhan   = get_dhan_client()
+        result = dhan.get_fund_limits()
+        return result.get("data", {})
+    except Exception as e:
+        log.error(f"Get fund limits failed: {e}")
+        return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  GET PORTFOLIO SUMMARY — v2.2.0
 # ═══════════════════════════════════════════════════════════════
 
 def get_portfolio_summary() -> dict:
-    """Get summary of all open positions with P&L."""
     try:
-        positions = get_positions()
-        orders    = get_all_orders()
+        positions  = get_positions()
+        orders     = get_all_orders()
+        funds      = get_fund_limits()
 
-        total_pnl    = sum(float(p.get("unrealizedProfit", 0)) for p in positions)
-        buy_trades   = [o for o in orders if o.get("transactionType") == "BUY"]
-        sell_trades  = [o for o in orders if o.get("transactionType") == "SELL"]
+        total_pnl  = sum(
+            float(p.get("unrealizedProfit", 0))
+            for p in positions
+        )
+        buy_orders  = [o for o in orders if o.get("transactionType") == "BUY"]
+        sell_orders = [o for o in orders if o.get("transactionType") == "SELL"]
 
         return {
             "open_positions":  len(positions),
             "total_orders":    len(orders),
-            "buy_orders":      len(buy_trades),
-            "sell_orders":     len(sell_trades),
+            "buy_orders":      len(buy_orders),
+            "sell_orders":     len(sell_orders),
             "unrealized_pnl":  round(total_pnl, 2),
+            "available_funds": funds.get("availabelBalance", 0),
             "positions":       positions,
         }
     except Exception as e:
@@ -355,23 +332,27 @@ def get_portfolio_summary() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  CANCEL ALL ORDERS
+#  CANCEL ALL ORDERS — v2.2.0
 # ═══════════════════════════════════════════════════════════════
 
 def cancel_all_orders() -> bool:
     """🚨 Emergency — cancel ALL pending orders."""
     try:
         dhan      = get_dhan_client()
-        orders    = dhan.get_order_list()
+        orders    = get_all_orders()
         cancelled = 0
-        for order in orders.get("data", []):
-            if order.get("orderStatus") in ["PENDING", "TRANSIT"]:
+
+        for order in orders:
+            status   = order.get("orderStatus", "")
+            order_id = order.get("orderId")
+            if status in ["PENDING", "TRANSIT", "PART_TRADED"] and order_id:
                 try:
-                    dhan.cancel_order(order["orderId"])
+                    dhan.cancel_order(order_id)
                     cancelled += 1
-                    log.info(f"Cancelled: {order['orderId']}")
+                    log.info(f"Cancelled: {order_id}")
                 except Exception as e:
-                    log.warning(f"Failed to cancel {order['orderId']}: {e}")
+                    log.warning(f"Failed to cancel {order_id}: {e}")
+
         log.info(f"Total cancelled: {cancelled}")
         return True
     except Exception as e:
@@ -380,13 +361,14 @@ def cancel_all_orders() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  SQUARE OFF ALL POSITIONS
+#  SQUARE OFF ALL POSITIONS — v2.2.0
 # ═══════════════════════════════════════════════════════════════
 
 def square_off_all() -> dict:
     """Close all open intraday positions at market price."""
     try:
         from dhanhq import dhanhq
+
         dhan      = get_dhan_client()
         positions = get_positions()
         closed    = []
@@ -394,12 +376,15 @@ def square_off_all() -> dict:
 
         for pos in positions:
             try:
-                qty       = abs(int(pos.get("netQty", 0)))
-                sec_id    = pos.get("securityId")
-                direction = dhanhq.SELL if pos.get("netQty", 0) > 0 else dhanhq.BUY
+                net_qty = int(pos.get("netQty", 0))
+                qty     = abs(net_qty)
+                sec_id  = str(pos.get("securityId", ""))
 
-                if qty == 0:
+                if qty == 0 or not sec_id:
                     continue
+
+                # Opposite direction to close
+                direction = dhanhq.SELL if net_qty > 0 else dhanhq.BUY
 
                 response = dhan.place_order(
                     security_id      = sec_id,
