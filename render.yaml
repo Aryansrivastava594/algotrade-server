@@ -1,22 +1,52 @@
 services:
   - type: web
-    name: algotrade-pro
+    name: algotrade-pro-v4
     runtime: python
-    pythonVersion: "3.12"
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    region: singapore          # Closest to India for NSE latency
+    plan: starter              # Upgrade to standard for 24/7 uptime
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
     envVars:
-      - key: ENVIRONMENT
-        value: render
+      # ── API Security ─────────────────────────────────────
       - key: API_KEY
+        generateValue: true    # Auto-generates strong key, copy from dashboard
+
+      # ── Dhan Broker ────────────────────────────────────
+      - key: DHAN_CLIENT_ID
+        sync: false            # Set manually in dashboard
+      - key: DHAN_ACCESS_TOKEN
         sync: false
+
+      # ── Telegram ─────────────────────────────────────
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+
+      # ── Supabase ─────────────────────────────────────
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
-    healthCheckPath: /health
-    autoDeploy: true
+
+      # ── Automation Settings ──────────────────────────
+      - key: PAPER_MODE
+        value: "true"          # Start safe, flip to false after testing
+      - key: MAX_DAILY_LOSS
+        value: "2000"
+      - key: MAX_CONSECUTIVE_LOSS
+        value: "3"
+      - key: MAX_POSITIONS
+        value: "5"
+
+      # ── System ───────────────────────────────────────
+      - key: ENVIRONMENT
+        value: "render"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONPATH
+        value: "."
+        
